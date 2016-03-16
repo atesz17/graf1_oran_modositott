@@ -96,8 +96,8 @@ const char *vertexSource = R"(
 
 	uniform mat4 MVP;			// Model-View-Projection matrix in row-major format
 
-	in vec2 vertexPosition;		// variable input from Attrib Array selected by glBindAttribLocation
-	in vec3 vertexColor;	    // variable input from Attrib Array selected by glBindAttribLocation
+	in vec2 vertexPosition;		// 0-as regiszter variable input from Attrib Array selected by glBindAttribLocation
+	in vec3 vertexColor;	    // 1-es regiszter variable input from Attrib Array selected by glBindAttribLocation
 	out vec3 color;				// output attribute
 
 	void main() {
@@ -175,6 +175,7 @@ public:
 		Animate(0);
 	}
 
+	// Eltolja, hogy a kameraablak kozepe az origiba viszi
 	mat4 V() { // view matrix: translates the center to the origin
 		return mat4(1, 0, 0, 0,
 			0, 1, 0, 0,
@@ -182,6 +183,7 @@ public:
 			-wCx, -wCy, 0, 1);
 	}
 
+	// Skalazas --> ablak szelessege 2, magassaga 2
 	mat4 P() { // projection matrix: scales it to be a square of edge length 2
 		return mat4(2 / wWx, 0, 0, 0,
 			0, 2 / wWy, 0, 0,
@@ -205,7 +207,7 @@ public:
 
 	void Animate(float t) {
 		wCx = 0; // 10 * cosf(t);
-		wCy = 0;
+		wCy = 5 * cosf(t); // kamera mozgatasa
 		wWx = 20;
 		wWy = 20;
 	}
@@ -218,9 +220,10 @@ Camera camera;
 unsigned int shaderProgram;
 
 class Triangle {
-	unsigned int vao;	// vertex array object id
+	unsigned int vao;	// vertex array object id Minden objektum egy vertex array object
 	float sx, sy;		// scaling
 	float wTx, wTy;		// translation
+	float phi; // forgatas
 public:
 	Triangle() {
 		Animate(0);
@@ -230,11 +233,14 @@ public:
 		glGenVertexArrays(1, &vao);	// create 1 vertex array object
 		glBindVertexArray(vao);		// make it active
 
+		// 2 vertex buffer object kulon a koordinatanak es kulon a szineknek
 		unsigned int vbo[2];		// vertex buffer objects
 		glGenBuffers(2, &vbo[0]);	// Generate 2 vertex buffer objects
 
 		// vertex coordinates: vbo[0] -> Attrib Array 0 -> vertexPosition of the vertex shader
+		// Az elsoben lesznek a koordinatak
 		glBindBuffer(GL_ARRAY_BUFFER, vbo[0]); // make it active, it is an array
+		// ? itt mar mi dontjuk el a koordinatakat ?
 		static float vertexCoords[] = { -8, -8, -6, 10, 8, -2 };	// vertex data on the CPU
 		glBufferData(GL_ARRAY_BUFFER,      // copy to the GPU
 			sizeof(vertexCoords),  // number of the vbo in bytes
@@ -243,12 +249,14 @@ public:
 		// Map Attribute Array 0 to the current bound vertex buffer (vbo[0])
 		glEnableVertexAttribArray(0);
 		// Data organization of Attribute Array 0 
+		// Leirjuk hogy a tombbol hogy kell kivenni az adatokat (2 float tartozik a csucsponthoz)
 		glVertexAttribPointer(0,			// Attribute Array 0
-			2, GL_FLOAT,  // components/attribute, component type
+			2, GL_FLOAT,  // components/attribute, component type --> lepesnagysag 2 float
 			GL_FALSE,		// not in fixed point format, do not normalized
 			0, NULL);     // stride and offset: it is tightly packed
 
 		// vertex colors: vbo[1] -> Attrib Array 1 -> vertexColor of the vertex shader
+		// Ez a szinekert felelos vertex buffer obj
 		glBindBuffer(GL_ARRAY_BUFFER, vbo[1]); // make it active, it is an array
 		static float vertexColors[] = { 1, 0, 0, 0, 1, 0, 0, 0, 1 };	// vertex data on the CPU
 		glBufferData(GL_ARRAY_BUFFER, sizeof(vertexColors), vertexColors, GL_STATIC_DRAW);	// copy to the GPU
@@ -260,25 +268,37 @@ public:
 	}
 
 	void Animate(float t) {
-		sx = 1; // *sinf(t);
-		sy = 1; // *cosf(t);
-		wTx = 0; // 4 * cosf(t / 2);
+		//sx = 1; // *sinf(t);
+		sx = 0.5; // *sinf(t);
+		//sy = 1; // *cosf(t);
+		sy = 0.5; // *cosf(t);
+		//wTx = 5; // 4 * cosf(t / 2);
+		wTx = 5 * cosf(t / 2);
 		wTy = 0; // 4 * sinf(t / 2);
+		phi = t * 2;
 	}
 
 	void Draw() {
-		mat4 M(sx, 0, 0, 0,
+		// At kell transzformalni a lokalis modellezesi koordinatarendszerbol a vilagba majd a normalizaltba
+		// Model
+		// eloszor skalaz es utana eltol
+		// a forgatas nem jol mukodik, mert a masodik sorbol lemaradt meg a sinusos dolgok
+		mat4 M(sx * cos(phi), -sx * sin(phi), 0, 0,
 			0, sy, 0, 0,
 			0, 0, 0, 0,
 			wTx, wTy, 0, 1); // model matrix
 
+		// View es Projection
 		mat4 MVPTransform = M * camera.V() * camera.P();
 
 		// set GPU uniform matrix variable MVP with the content of CPU variable MVPTransform
+		// lekerdezzuk az MVP helyet
 		int location = glGetUniformLocation(shaderProgram, "MVP");
+		// atmegy egy unfirom valtozora
 		if (location >= 0) glUniformMatrix4fv(location, 1, GL_TRUE, MVPTransform); // set uniform variable MVP to the MVPTransform
 		else printf("uniform MVP cannot be set\n");
 
+		// A rajzolas mindig igy --> 1. Bind 2. DrawArrays
 		glBindVertexArray(vao);	// make the vao and its vbos active playing the role of the data source
 		glDrawArrays(GL_TRIANGLES, 0, 3);	// draw a single triangle with vertices defined in vao
 	}
@@ -293,27 +313,36 @@ public:
 		nVertices = 0;
 	}
 	void Create() {
-		glGenVertexArrays(1, &vao);
+		glGenVertexArrays(1, &vao); //vertex array object
 		glBindVertexArray(vao);
 
+		// az adatok egyetlen egy tombben lesznek (poziciok es szinek is egy tombben (haromszogben kulon vannak) SOA vs AOS)
 		glGenBuffers(1, &vbo); // Generate 1 vertex buffer object
 		glBindBuffer(GL_ARRAY_BUFFER, vbo);
 		// Enable the vertex attribute arrays
 		glEnableVertexAttribArray(0);  // attribute array 0
 		glEnableVertexAttribArray(1);  // attribute array 1
 		// Map attribute array 0 to the vertex data of the interleaved vbo
+		// 0asba megy 2 float (koord)
 		glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, 5 * sizeof(float), reinterpret_cast<void*>(0)); // attribute array, components/attribute, component type, normalize?, stride, offset
 		// Map attribute array 1 to the color data of the interleaved vbo
+		// 1esbe registerbe (attr array) 3 floatot kap (szinek) 2es offsettel
 		glVertexAttribPointer(1, 3, GL_FLOAT, GL_FALSE, 5 * sizeof(float), reinterpret_cast<void*>(2 * sizeof(float)));
+		// krealtunk 2 regisztert de meg nem tettunk bele semmit (azt majd az addpointban)
 	}
 
 	void AddPoint(float cX, float cY) {
 		if (nVertices >= 20) return;
 
+		// attranszformaljuk vilag koordinatarendszerbe (ezert kell az inverz)
+		// Pinv --> Projekcios inv transzf, Vinv --> View
+		// w prefix --> wolrd coord
 		vec4 wVertex = vec4(cX, cY, 0, 1) * camera.Pinv() * camera.Vinv();
 		// fill interleaved data
 		vertexData[5 * nVertices] = wVertex.v[0];
 		vertexData[5 * nVertices + 1] = wVertex.v[1];
+		// itt igazabol folosleges mindig ujra szinezni, hiszen mindig ugyanaz
+		// uniformnak kene lenniuk a szineknek
 		vertexData[5 * nVertices + 2] = 1; // red
 		vertexData[5 * nVertices + 3] = 1; // green
 		vertexData[5 * nVertices + 4] = 0; // blue
@@ -325,8 +354,10 @@ public:
 
 	void Draw() {
 		if (nVertices > 0) {
+			// atviszi vilagbol a normalizalt eszkozkoordinatarendszerbe
 			mat4 VPTransform = camera.V() * camera.P();
 
+			// Model View Projection --> Model most egysegmatrix
 			int location = glGetUniformLocation(shaderProgram, "MVP");
 			if (location >= 0) glUniformMatrix4fv(location, 1, GL_TRUE, VPTransform);
 			else printf("uniform MVP cannot be set\n");
@@ -418,12 +449,15 @@ void onKeyboardUp(unsigned char key, int pX, int pY) {
 }
 
 // Mouse click event
-void onMouse(int button, int state, int pX, int pY) {
+void onMouse(int button, int state, int pX, int pY) { // a koordinatak a windowsos koordianataban jonnek
 	if (button == GLUT_LEFT_BUTTON && state == GLUT_DOWN) {  // GLUT_LEFT_BUTTON / GLUT_RIGHT_BUTTON and GLUT_DOWN / GLUT_UP
+		// pX --> pixel koordinata, cX --> normalizalt eszkozkoordinata
+		// atkonvertalunk normalizalt eszkozkoordinataba
 		float cX = 2.0f * pX / windowWidth - 1;	// flip y axis
 		float cY = 1.0f - 2.0f * pY / windowHeight;
+		// linestrip mar (-1, 1)-es normalizalt koordinatakat kap
 		lineStrip.AddPoint(cX, cY);
-		glutPostRedisplay();     // redraw
+		glutPostRedisplay();     // redraw --> ondisplay()
 	}
 }
 
